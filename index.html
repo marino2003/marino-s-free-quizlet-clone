@@ -14,6 +14,7 @@
             <button onclick="switchView('input')" id="nav-input" class="active">Editor</button>
             <button onclick="switchView('flashcards')" id="nav-flashcards">Flashcards</button>
             <button onclick="switchView('quiz')" id="nav-quiz">Quiz</button>
+            <button onclick="switchView('typing-quiz')" id="nav-typing-quiz">Typing</button>
         </nav>
         <div class="import-export-buttons">
             <button onclick="importFile()" class="import-btn">Import</button>
@@ -75,7 +76,17 @@
                 </div>
 
                 <div class="quiz-card">
-                    <div class="quiz-question-label">Definition</div>
+                    <div class="quiz-mode-controls">
+                        <span class="quiz-question-label" id="quiz-label">Definition</span>
+                        <div class="mode-toggle">
+                            <label class="switch">
+                                <input type="checkbox" id="quiz-mode-toggle" onchange="toggleQuizMode()">
+                                <span class="slider round"></span>
+                            </label>
+                            <span class="mode-labels">Def → Term</span>
+                            <span class="mode-labels-alt">Term → Def</span>
+                        </div>
+                    </div>
                     <div class="quiz-definition" id="quiz-question">
                         <!-- Question Text -->
                     </div>
@@ -85,7 +96,49 @@
                     </div>
                 </div>
                 <div style="margin-top: 1rem; text-align: center; color: var(--text-secondary);">
-                    Current Streak: <span id="quiz-score">0</span> | Total Attempts: <span id="quiz-attempts">0</span>
+                    Current Streak: <span id="quiz-score">0</span> | Incorrect Attempts: <span id="quiz-attempts">0</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- TYPING QUIZ VIEW -->
+        <section id="view-typing-quiz" class="view-section">
+            <div class="typing-quiz-container">
+                <div class="progress-bar-container">
+                    <div class="progress-bar-fill" id="typing-progress-bar-fill"></div>
+                </div>
+
+                <div class="typing-quiz-card">
+                    <div class="quiz-mode-controls">
+                        <span class="quiz-question-label" id="typing-quiz-label">Definition</span>
+                        <div class="mode-toggle">
+                            <label class="switch">
+                                <input type="checkbox" id="typing-quiz-mode-toggle" onchange="toggleTypingQuizMode()">
+                                <span class="slider round"></span>
+                            </label>
+                            <span class="mode-labels">Def → Term</span>
+                            <span class="mode-labels-alt">Term → Def</span>
+                        </div>
+                    </div>
+                    <div class="quiz-definition" id="typing-quiz-question">
+                        <!-- Question Text -->
+                    </div>
+
+                    <div class="typing-input-container">
+                        <input type="text" id="typing-answer-input" placeholder="Type the word that matches this definition..." autocomplete="off">
+                        <button class="btn-primary" id="typing-submit-btn" onclick="submitTypingAnswer()">Submit</button>
+                    </div>
+
+                    <div class="typing-feedback" id="typing-feedback">
+                        <!-- Feedback appears here -->
+                    </div>
+
+                    <div class="typing-controls">
+                        <button class="btn-secondary" id="typing-skip-btn" onclick="skipTypingQuestion()">Skip</button>
+                    </div>
+                </div>
+                <div style="margin-top: 1rem; text-align: center; color: var(--text-secondary);">
+                    Current Streak: <span id="typing-quiz-score">0</span> | Incorrect Attempts: <span id="typing-quiz-attempts">0</span>
                 </div>
             </div>
         </section>
@@ -116,8 +169,29 @@
         let masteredTerms = new Set(); // Tracks unique terms answered correctly
         let missedTerms = new Set(); // Tracks terms that were answered incorrectly
         let score = 0; // Current correct streak
-        let questionsAttempted = 0; // Total attempts made in this session
+        let totalQuestionsAttempted = 0; // Total attempts made in this session (both correct and incorrect)
+        let incorrectQuestionsAttempted = 0; // Number of incorrect attempts (for display as "Total Attempts")
         let questionsCorrectOverall = 0; // Total correct attempts
+
+        // Typing Quiz State
+        let typingQuizQueue = []; // Holds items pending and needing retry for typing quiz
+        let typingMasteredTerms = new Set(); // Tracks terms mastered in typing quiz
+        let typingMissedTerms = new Set(); // Tracks terms missed in typing quiz
+        let typingScore = 0; // Current correct streak in typing quiz
+        let totalTypingQuestionsAttempted = 0; // Total attempts in typing quiz
+        let incorrectTypingQuestionsAttempted = 0; // Number of incorrect attempts in typing quiz
+        let typingQuestionsCorrectOverall = 0; // Total correct in typing quiz
+        let currentTypingQuestion = null; // Current question in typing quiz
+
+        // Current quiz type tracking (for results overlay)
+        let currentQuizType = 'quiz'; // 'quiz' for multiple choice, 'typing-quiz' for typing quiz
+
+        // Track terms missed on first attempt only
+        let firstMissedTerms = new Set(); // Terms missed on first attempt in multiple-choice quiz
+        let firstTypingMissedTerms = new Set(); // Terms missed on first attempt in typing quiz
+
+        // Quiz mode (true = definition->term, false = term->definition)
+        let quizMode = true; // true = Definition → Term (traditional), false = Term → Definition
 
         // --- Core Functions ---
 
@@ -175,7 +249,8 @@
                 // Reset States
                 initFlashcards();
                 initQuiz();
-                
+                initTypingQuiz();
+
                 // Go to flashcards
                 switchView('flashcards');
 
@@ -216,8 +291,13 @@
             }
 
             if(viewName === 'quiz') {
+                currentQuizType = 'quiz';
                 resetQuizState();
                 loadNextQuestion();
+            } else if(viewName === 'typing-quiz') {
+                currentQuizType = 'typing-quiz';
+                resetTypingQuizState();
+                loadNextTypingQuestion();
             }
         }
 
@@ -303,8 +383,10 @@
             quizQueue = [...vocabList].sort(() => Math.random() - 0.5);
             masteredTerms = new Set();
             missedTerms = new Set(); // Reset missed terms as well
+            firstMissedTerms = new Set(); // Reset first-time misses as well
             score = 0;
-            questionsAttempted = 0;
+            totalQuestionsAttempted = 0;
+            incorrectQuestionsAttempted = 0;
             questionsCorrectOverall = 0;
             updateScoreDisplay();
         }
@@ -317,13 +399,13 @@
             const totalCards = vocabList.length;
 
             document.getElementById('quiz-score').textContent = score;
-            document.getElementById('quiz-attempts').textContent = questionsAttempted;
+            document.getElementById('quiz-attempts').textContent = incorrectQuestionsAttempted;
 
             // Progress Bar Update
             const progressFill = document.getElementById('progress-bar-fill');
             const masteredCount = masteredTerms.size;
             const percentage = totalCards > 0 ? (masteredCount / totalCards) * 100 : 0;
-            
+
             if (progressFill) {
                 progressFill.style.width = `${percentage}%`;
             }
@@ -364,8 +446,8 @@
             // Check if this question was previously missed
             const wasMissed = missedTerms.has(current.term);
 
-            // UI Text
-            document.getElementById('quiz-question').textContent = current.def;
+            // Display the question according to current mode
+            displayQuestionInMode(current);
 
             // Add indicator if this was a previously missed question
             const quizQuestionElement = document.getElementById('quiz-question');
@@ -382,47 +464,10 @@
                 const indicator = document.createElement('div');
                 indicator.className = 'missed-question-indicator';
                 indicator.textContent = '⚠️ You previously missed this question';
-                indicator.style.cssText = `
-                    background-color: #ffecb3;
-                    color: #746a00;
-                    padding: 0.5rem;
-                    border-radius: 8px;
-                    margin-bottom: 1rem;
-                    text-align: center;
-                    font-weight: 600;
-                    font-size: 0.9rem;
-                    border: 2px solid #ffd43b;
-                    animation: fadeIn 0.3s ease;
-                `;
 
                 // Insert the indicator before the quiz question
                 quizCardElement.insertBefore(indicator, quizQuestionElement);
             }
-
-            // Generate Options: Correct answer + 3 distractors
-            let options = [current];
-            
-            // Get distractors (excluding the current correct term)
-            const potentialDistractors = vocabList.filter(item => item.term !== current.term);
-            const shuffledDistractors = potentialDistractors.sort(() => Math.random() - 0.5);
-            
-            // Add up to 3 distractors
-            options = options.concat(shuffledDistractors.slice(0, 3));
-            
-            // Shuffle final options
-            options = options.sort(() => Math.random() - 0.5);
-
-            // Render Buttons
-            const grid = document.getElementById('quiz-options');
-            grid.innerHTML = '';
-
-            options.forEach(opt => {
-                const btn = document.createElement('button');
-                btn.className = 'option-btn';
-                btn.textContent = opt.term;
-                btn.onclick = () => handleAnswer(btn, opt.term);
-                grid.appendChild(btn);
-            });
         }
 
         function handleAnswer(btnElement, selectedTerm) {
@@ -433,7 +478,7 @@
             const isCorrect = selectedTerm === currentQuestion.term;
             const term = currentQuestion.term;
 
-            questionsAttempted++;
+            totalQuestionsAttempted++; // Increment total attempts for both correct and incorrect
 
             if (isCorrect) {
                 btnElement.classList.add('correct');
@@ -451,6 +496,13 @@
                 // Play correct sound effect
                 playCorrectSound();
             } else {
+                incorrectQuestionsAttempted++; // Only increment incorrect attempts on wrong answers
+
+                // Track if this is the first time this term was missed
+                if (!missedTerms.has(term)) {
+                    firstMissedTerms.add(term);
+                }
+
                 btnElement.classList.add('wrong');
                 score = 0; // Reset streak on failure
 
@@ -487,8 +539,8 @@
         function showResults() {
             const overlay = document.getElementById('results-overlay');
             const totalCards = vocabList.length;
-            const accuracy = questionsAttempted > 0 
-                ? `${Math.round((questionsCorrectOverall / questionsAttempted) * 100)}%` 
+            const accuracy = totalQuestionsAttempted > 0
+                ? `${Math.round((questionsCorrectOverall / totalQuestionsAttempted) * 100)}%`
                 : 'N/A';
             
             document.getElementById('result-total-cards').textContent = totalCards;
@@ -500,12 +552,598 @@
 
         function restartQuiz() {
             document.getElementById('results-overlay').style.display = 'none';
-            resetQuizState();
-            loadNextQuestion();
+
+            // Restart based on the quiz type that triggered the results
+            if (currentQuizType === 'quiz') {
+                resetQuizState();
+                loadNextQuestion();
+            } else if (currentQuizType === 'typing-quiz') {
+                resetTypingQuizState();
+                loadNextTypingQuestion();
+            }
         }
 
         function closeResults() {
             document.getElementById('results-overlay').style.display = 'none';
+
+            // Close based on the quiz type that triggered the results
+            if (currentQuizType === 'quiz') {
+                resetQuizState();
+                loadNextQuestion();
+            } else if (currentQuizType === 'typing-quiz') {
+                resetTypingQuizState();
+                loadNextTypingQuestion();
+            }
+        }
+
+        // --- Typing Quiz Functions ---
+        function initTypingQuiz() {
+            resetTypingQuizState();
+        }
+
+        function resetTypingQuizState() {
+            if (vocabList.length < 1) {
+                document.getElementById('typing-quiz-question').textContent = "Please create a study set first.";
+                return;
+            }
+
+            // Shuffle a copy of vocabList for the initial typing quiz queue
+            typingQuizQueue = [...vocabList].sort(() => Math.random() - 0.5);
+            typingMasteredTerms = new Set();
+            typingMissedTerms = new Set();
+            firstTypingMissedTerms = new Set(); // Reset first-time misses as well
+            typingScore = 0;
+            totalTypingQuestionsAttempted = 0;
+            incorrectTypingQuestionsAttempted = 0;
+            typingQuestionsCorrectOverall = 0;
+            updateTypingScoreDisplay();
+        }
+
+        function updateTypingScoreDisplay() {
+            const totalCards = vocabList.length;
+
+            document.getElementById('typing-quiz-score').textContent = typingScore;
+            document.getElementById('typing-quiz-attempts').textContent = incorrectTypingQuestionsAttempted;
+
+            // Progress Bar Update for typing quiz
+            const progressFill = document.getElementById('typing-progress-bar-fill');
+            const masteredCount = typingMasteredTerms.size;
+            const percentage = totalCards > 0 ? (masteredCount / totalCards) * 100 : 0;
+
+            if (progressFill) {
+                progressFill.style.width = `${percentage}%`;
+            }
+        }
+
+        function loadNextTypingQuestion() {
+            if (vocabList.length === 0) return;
+
+            // Completion check: All unique terms must be in the mastered set
+            if (typingMasteredTerms.size === vocabList.length) {
+                showTypingResults();
+                return;
+            }
+
+            // If the primary queue is empty, something went wrong, but ideally it shouldn't
+            if (typingQuizQueue.length === 0) {
+                // This case should ideally not happen if typingMasteredTerms.size < vocabList.length
+                // Re-queue any item not in masteredTerms as a fail-safe
+                vocabList.forEach(item => {
+                    if (!typingMasteredTerms.has(item.term)) {
+                        typingQuizQueue.push(item);
+                    }
+                });
+                // If still empty, show results, otherwise proceed.
+                if (typingQuizQueue.length === 0) {
+                     showTypingResults();
+                     return;
+                }
+                // Shuffle the emergency refill
+                typingQuizQueue.sort(() => Math.random() - 0.5);
+            }
+
+            // Get the next question from the front of the queue
+            const current = typingQuizQueue.shift();
+            currentTypingQuestion = current; // {term, def}
+
+            // Check if this question was previously missed in typing quiz
+            const wasMissed = typingMissedTerms.has(current.term);
+
+            // UI Text
+            document.getElementById('typing-quiz-question').textContent = current.def;
+
+            // Clear input and feedback
+            const inputElement = document.getElementById('typing-answer-input');
+            inputElement.value = '';
+            document.getElementById('typing-feedback').innerHTML = '';
+            inputElement.focus();
+
+            // Update placeholder based on quiz mode
+            if (quizMode) { // Definition -> Term
+                inputElement.placeholder = 'Type the word that matches this definition...';
+            } else { // Term -> Definition
+                inputElement.placeholder = 'Type the definition for this word...';
+            }
+
+            // Add Enter key event listener
+            inputElement.onkeypress = function(event) {
+                if (event.key === 'Enter') {
+                    submitTypingAnswer();
+                }
+            };
+
+            // Add missed indicator if applicable
+            const feedbackElement = document.getElementById('typing-feedback');
+            if (wasMissed) {
+                feedbackElement.innerHTML = '<div class="missed-question-indicator" style="margin: 10px 0; padding: 8px; font-size: 0.9em;">⚠️ You previously missed this question</div>';
+            }
+        }
+
+        function submitTypingAnswer() {
+            const userAnswer = document.getElementById('typing-answer-input').value.trim();
+            if (!userAnswer || !currentTypingQuestion) return;
+
+            totalTypingQuestionsAttempted++; // Always increment total attempts
+
+            const isCorrect = userAnswer.toLowerCase() === currentTypingQuestion.term.toLowerCase();
+            const term = currentTypingQuestion.term;
+            const correctTerm = currentTypingQuestion.term;
+
+            const feedbackElement = document.getElementById('typing-feedback');
+
+            // Clear any previous indicator
+            const existingIndicator = feedbackElement.querySelector('.missed-question-indicator');
+            if (existingIndicator) {
+                existingIndicator.remove();
+            }
+
+            if (isCorrect) {
+                feedbackElement.innerHTML = `<span class="typing-feedback correct">✓ Correct! The answer is: <strong>${correctTerm}</strong></span>`;
+
+                typingScore++;
+                typingQuestionsCorrectOverall++;
+
+                // Add to mastered set
+                typingMasteredTerms.add(term);
+
+                // If this term was previously missed, remove it from missed set
+                if (typingMissedTerms.has(term)) {
+                    typingMissedTerms.delete(term);
+                }
+
+                // Play correct sound effect
+                playCorrectSound();
+            } else {
+                incorrectTypingQuestionsAttempted++; // Only increment incorrect attempts on wrong answers
+
+                // Track if this is the first time this term was missed
+                if (!typingMissedTerms.has(term)) {
+                    firstTypingMissedTerms.add(term);
+                }
+
+                feedbackElement.innerHTML = `<span class="typing-feedback incorrect">✗ Incorrect. Your answer: <strong>${userAnswer}</strong><br>Correct answer: <strong>${correctTerm}</strong></span>`;
+
+                typingScore = 0; // Reset streak on failure
+
+                // REINFORCEMENT LEARNING: Re-queue the question
+                // Insert it randomly between position 1 and 3 (or at the end if the queue is short)
+                const insertionIndex = Math.min(typingQuizQueue.length, Math.floor(Math.random() * 3) + 1);
+                typingQuizQueue.splice(insertionIndex, 0, currentTypingQuestion);
+
+                // If they fail, they lose mastery status (must re-master)
+                typingMasteredTerms.delete(term);
+
+                // Track that this term was missed
+                typingMissedTerms.add(term);
+
+                // Play incorrect sound effect
+                playIncorrectSound();
+            }
+
+            updateTypingScoreDisplay(); // Updates streak, attempts, and progress bar
+
+            // Wait 2 seconds before loading the next question
+            setTimeout(() => {
+                loadNextTypingQuestion();
+            }, 2000);
+        }
+
+        function skipTypingQuestion() {
+            if (!currentTypingQuestion) return;
+
+            totalTypingQuestionsAttempted++; // Increment total attempts
+            incorrectTypingQuestionsAttempted++; // Increment incorrect attempts (since skip = incorrect)
+
+            // Track if this is the first time this term was missed (when skipped)
+            if (!typingMissedTerms.has(currentTypingQuestion.term)) {
+                firstTypingMissedTerms.add(currentTypingQuestion.term);
+            }
+
+            typingScore = 0; // Reset streak when skipping
+
+            // REINFORCEMENT LEARNING: Re-queue the question
+            // Insert it randomly between position 1 and 3 (or at the end if the queue is short)
+            const insertionIndex = Math.min(typingQuizQueue.length, Math.floor(Math.random() * 3) + 1);
+            typingQuizQueue.splice(insertionIndex, 0, currentTypingQuestion);
+
+            // If they skip, they don't master it
+            typingMasteredTerms.delete(currentTypingQuestion.term);
+
+            // Track that this term was missed
+            typingMissedTerms.add(currentTypingQuestion.term);
+
+            // Don't add to missed terms for a skip, just re-queue
+            loadNextTypingQuestion();
+        }
+
+        function showTypingResults() {
+            const overlay = document.getElementById('results-overlay');
+            const totalCards = vocabList.length;
+            const accuracy = totalTypingQuestionsAttempted > 0
+                ? `${Math.round((typingQuestionsCorrectOverall / totalTypingQuestionsAttempted) * 100)}%`
+                : 'N/A';
+
+            document.getElementById('result-total-cards').textContent = totalCards;
+            document.getElementById('final-score').textContent = totalCards > 0 ? '100%' : 'N/A'; // 100% since they mastered all
+            document.getElementById('result-accuracy').textContent = accuracy;
+
+            // Show first-time misses
+            displayFirstTimeMisses(overlay);
+
+            overlay.style.display = 'flex';
+        }
+
+        // Function to toggle quiz mode (Definition -> Term or Term -> Definition)
+        function toggleQuizMode() {
+            quizMode = !document.getElementById('quiz-mode-toggle').checked; // The checkbox is inverted in the UI
+            // Update the label text immediately
+            updateQuizModeLabel();
+
+            // Reload the current question to reflect the new mode
+            if (currentQuizType === 'quiz' && currentQuestion) {
+                // Temporarily save the current question info
+                const savedQuestion = currentQuestion;
+                const savedQueue = [...quizQueue]; // Make a copy of the queue
+                const savedMastered = new Set(masteredTerms);
+                const savedMissed = new Set(missedTerms);
+
+                // Clear and reset the queue
+                quizQueue = savedQueue;
+                masteredTerms = savedMastered;
+                missedTerms = savedMissed;
+
+                // Show the current question again in the new mode
+                displayQuestionInMode(savedQuestion);
+            }
+        }
+
+        function toggleTypingQuizMode() {
+            quizMode = !document.getElementById('typing-quiz-mode-toggle').checked; // The checkbox is inverted in the UI
+            // Update the label text immediately
+            updateTypingQuizModeLabel();
+
+            // Reload the current question to reflect the new mode
+            if (currentQuizType === 'typing-quiz' && currentTypingQuestion) {
+                // Temporarily save the current question info
+                const savedQuestion = currentTypingQuestion;
+                const savedQueue = [...typingQuizQueue]; // Make a copy of the queue
+                const savedMastered = new Set(typingMasteredTerms);
+                const savedMissed = new Set(typingMissedTerms);
+
+                // Clear and reset the queue
+                typingQuizQueue = savedQueue;
+                typingMasteredTerms = savedMastered;
+                typingMissedTerms = savedMissed;
+
+                // Show the current question again in the new mode
+                displayTypingQuestionInMode(savedQuestion);
+            }
+        }
+
+        function updateQuizModeLabel() {
+            const quizLabel = document.getElementById('quiz-label');
+            const checkbox = document.getElementById('quiz-mode-toggle');
+
+            if (quizMode) { // Definition -> Term
+                quizLabel.textContent = 'Definition';
+                checkbox.checked = false;
+            } else { // Term -> Definition
+                quizLabel.textContent = 'Term';
+                checkbox.checked = true;
+            }
+        }
+
+        function updateTypingQuizModeLabel() {
+            const typingQuizLabel = document.getElementById('typing-quiz-label');
+            const checkbox = document.getElementById('typing-quiz-mode-toggle');
+
+            if (quizMode) { // Definition -> Term
+                typingQuizLabel.textContent = 'Definition';
+                checkbox.checked = false;
+            } else { // Term -> Definition
+                typingQuizLabel.textContent = 'Term';
+                checkbox.checked = true;
+            }
+        }
+
+        // Function to display a question according to the current mode
+        function displayQuestionInMode(question) {
+            if (quizMode) { // Definition -> Term (traditional)
+                document.getElementById('quiz-question').textContent = question.def;
+            } else { // Term -> Definition
+                document.getElementById('quiz-question').textContent = question.term;
+            }
+
+            // Generate new options based on the current mode
+            generateQuizOptions(question);
+        }
+
+        // Function to generate quiz options based on the current mode
+        function generateQuizOptions(current) {
+            let options = [current];
+            let correctOption; // Track which option is correct based on mode
+
+            if (quizMode) { // Definition -> Term: options are terms
+                // Get distractors (other terms)
+                const potentialDistractors = vocabList.filter(item => item.term !== current.term);
+                const shuffledDistractors = potentialDistractors.sort(() => Math.random() - 0.5);
+
+                // Add up to 3 distractors
+                options = options.concat(shuffledDistractors.slice(0, 3));
+                correctOption = current.term;
+            } else { // Term -> Definition: options are definitions
+                // Get distractors (other definitions)
+                const potentialDistractors = vocabList.filter(item => item.def !== current.def);
+                const shuffledDistractors = potentialDistractors.sort(() => Math.random() - 0.5);
+
+                // Add up to 3 distractors
+                options = options.concat(shuffledDistractors.slice(0, 3));
+                correctOption = current.def;
+            }
+
+            // Shuffle final options
+            options = options.sort(() => Math.random() - 0.5);
+
+            // Render Buttons
+            const grid = document.getElementById('quiz-options');
+            grid.innerHTML = '';
+
+            options.forEach(opt => {
+                const btn = document.createElement('button');
+                btn.className = 'option-btn';
+
+                if (quizMode) { // Definition -> Term
+                    btn.textContent = opt.term;
+                } else { // Term -> Definition
+                    btn.textContent = opt.def;
+                }
+
+                btn.onclick = () => handleAnswer(btn, quizMode ? opt.term : opt.def, correctOption);
+                grid.appendChild(btn);
+            });
+        }
+
+        // Updated handleAnswer to accept the correct option
+        function handleAnswer(btnElement, selectedTerm, correctAnswer) {
+            // If correctAnswer wasn't provided (for backward compatibility), derive it from currentQuestion
+            if (correctAnswer === undefined) {
+                correctAnswer = quizMode ? currentQuestion.term : currentQuestion.def;
+            }
+
+            // Disable all buttons to prevent double clicking
+            const allBtns = document.querySelectorAll('.option-btn');
+            allBtns.forEach(b => b.classList.add('disabled'));
+
+            const isCorrect = selectedTerm === correctAnswer;
+            const term = quizMode ? currentQuestion.term : correctAnswer; // Use the actual term for tracking
+
+            totalQuestionsAttempted++; // Increment total attempts for both correct and incorrect
+
+            if (isCorrect) {
+                btnElement.classList.add('correct');
+                score++;
+                questionsCorrectOverall++;
+
+                // Add to mastered set (this item is complete for this study session)
+                masteredTerms.add(currentQuestion.term); // Always use the original term for tracking
+
+                // If this term was previously missed, remove it from missed set
+                if (missedTerms.has(currentQuestion.term)) {
+                    missedTerms.delete(currentQuestion.term);
+                }
+
+                // Play correct sound effect
+                playCorrectSound();
+            } else {
+                incorrectQuestionsAttempted++; // Only increment incorrect attempts on wrong answers
+
+                // Track if this is the first time this term was missed
+                if (!missedTerms.has(currentQuestion.term)) {
+                    firstMissedTerms.add(currentQuestion.term);
+                }
+
+                btnElement.classList.add('wrong');
+                score = 0; // Reset streak on failure
+
+                // Highlight the correct one
+                allBtns.forEach(b => {
+                    let optionValue;
+                    if (quizMode) { // Definition -> Term
+                        optionValue = vocabList.find(item => item.term === b.textContent)?.term || b.textContent;
+                    } else { // Term -> Definition
+                        optionValue = vocabList.find(item => item.def === b.textContent)?.def || b.textContent;
+                    }
+
+                    if (optionValue === correctAnswer) {
+                        b.classList.add('correct');
+                    }
+                });
+
+                // REINFORCEMENT LEARNING: Re-queue the question
+                // Insert it randomly between position 1 and 3 (or at the end if the queue is short)
+                const insertionIndex = Math.min(quizQueue.length, Math.floor(Math.random() * 3) + 1);
+                quizQueue.splice(insertionIndex, 0, currentQuestion);
+
+                // If they fail, they lose mastery status (must re-master)
+                masteredTerms.delete(currentQuestion.term); // Always use original term
+
+                // Track that this term was missed
+                missedTerms.add(currentQuestion.term); // Always use original term
+
+                // Play incorrect sound effect
+                playIncorrectSound();
+            }
+
+            updateScoreDisplay(); // Updates streak, attempts, and progress bar
+
+            // Wait 1.5s then load the next question
+            setTimeout(() => {
+                loadNextQuestion();
+            }, 1500);
+        }
+
+        // Function to display a typing question according to the current mode
+        function displayTypingQuestionInMode(question) {
+            const quizQuestionElement = document.getElementById('typing-quiz-question');
+
+            if (quizMode) { // Definition -> Term (traditional)
+                quizQuestionElement.textContent = question.def;
+            } else { // Term -> Definition
+                quizQuestionElement.textContent = question.term;
+            }
+
+            // Update placeholder based on mode
+            const inputElement = document.getElementById('typing-answer-input');
+            if (quizMode) { // Definition -> Term
+                inputElement.placeholder = 'Type the word that matches this definition...';
+            } else { // Term -> Definition
+                inputElement.placeholder = 'Type the definition for this word...';
+            }
+        }
+
+        // Function to handle typing answer with mode consideration
+        function submitTypingAnswer() {
+            const userAnswer = document.getElementById('typing-answer-input').value.trim();
+            if (!userAnswer || !currentTypingQuestion) return;
+
+            totalTypingQuestionsAttempted++; // Always increment total attempts
+
+            let isCorrect = false;
+            let correctAnswer = '';
+
+            if (quizMode) { // Definition -> Term: user should type the term
+                isCorrect = userAnswer.toLowerCase() === currentTypingQuestion.term.toLowerCase();
+                correctAnswer = currentTypingQuestion.term;
+            } else { // Term -> Definition: user should type the definition
+                isCorrect = userAnswer.toLowerCase() === currentTypingQuestion.def.toLowerCase();
+                correctAnswer = currentTypingQuestion.def;
+            }
+
+            const term = currentTypingQuestion.term; // Always use original term for tracking
+            const feedbackElement = document.getElementById('typing-feedback');
+
+            // Clear any previous indicator
+            const existingIndicator = feedbackElement.querySelector('.missed-question-indicator');
+            if (existingIndicator) {
+                existingIndicator.remove();
+            }
+
+            if (isCorrect) {
+                feedbackElement.innerHTML = `<span class="typing-feedback correct">✓ Correct! The answer is: <strong>${correctAnswer}</strong></span>`;
+
+                typingScore++;
+                typingQuestionsCorrectOverall++;
+
+                // Add to mastered set
+                typingMasteredTerms.add(term);
+
+                // If this term was previously missed, remove it from missed set
+                if (typingMissedTerms.has(term)) {
+                    typingMissedTerms.delete(term);
+                }
+
+                // Play correct sound effect
+                playCorrectSound();
+            } else {
+                incorrectTypingQuestionsAttempted++; // Only increment incorrect attempts on wrong answers
+
+                // Track if this is the first time this term was missed
+                if (!typingMissedTerms.has(term)) {
+                    firstTypingMissedTerms.add(term);
+                }
+
+                feedbackElement.innerHTML = `<span class="typing-feedback incorrect">✗ Incorrect. Your answer: <strong>${userAnswer}</strong><br>Correct answer: <strong>${correctAnswer}</strong></span>`;
+
+                typingScore = 0; // Reset streak on failure
+
+                // REINFORCEMENT LEARNING: Re-queue the question
+                // Insert it randomly between position 1 and 3 (or at the end if the queue is short)
+                const insertionIndex = Math.min(typingQuizQueue.length, Math.floor(Math.random() * 3) + 1);
+                typingQuizQueue.splice(insertionIndex, 0, currentTypingQuestion);
+
+                // If they fail, they lose mastery status (must re-master)
+                typingMasteredTerms.delete(term);
+
+                // Track that this term was missed
+                typingMissedTerms.add(term);
+
+                // Play incorrect sound effect
+                playIncorrectSound();
+            }
+
+            updateTypingScoreDisplay(); // Updates streak, attempts, and progress bar
+
+            // Wait 2 seconds before loading the next question
+            setTimeout(() => {
+                loadNextTypingQuestion();
+            }, 2000);
+        }
+
+        // Function to display first-time misses in the results overlay
+        function displayFirstTimeMisses(overlay) {
+            // Clear any previous first time misses display
+            const existingMisses = overlay.querySelector('.first-time-misses');
+            if (existingMisses) {
+                existingMisses.remove();
+            }
+
+            let firstMisses = [];
+            if (currentQuizType === 'quiz') {
+                // Get the actual term/def pairs for the missed terms
+                firstMisses = Array.from(firstMissedTerms).map(term => {
+                    return vocabList.find(item => item.term === term);
+                }).filter(item => item !== undefined);
+            } else if (currentQuizType === 'typing-quiz') {
+                // Get the actual term/def pairs for the missed terms in typing quiz
+                firstMisses = Array.from(firstTypingMissedTerms).map(term => {
+                    return vocabList.find(item => item.term === term);
+                }).filter(item => item !== undefined);
+            }
+
+            if (firstMisses.length > 0) {
+                const missesContainer = document.createElement('div');
+                missesContainer.className = 'first-time-misses';
+
+                missesContainer.innerHTML = `
+                    <h3>Terms You Initially Missed:</h3>
+                    <div class="first-time-misses-list">
+                        ${firstMisses.map(item => `
+                            <div class="first-time-miss-item">
+                                <strong>${item.term}</strong>
+                                <span>Definition: ${item.def}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+
+                // Insert before the close/restart buttons
+                const buttons = overlay.querySelector('button');
+                if (buttons) {
+                    overlay.insertBefore(missesContainer, buttons);
+                } else {
+                    overlay.appendChild(missesContainer);
+                }
+            }
         }
 
         // Import file functionality
