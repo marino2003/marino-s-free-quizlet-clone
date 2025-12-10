@@ -20,8 +20,9 @@
             <button onclick="exportFile()" class="export-btn">Export</button>
         </div>
     </header>
-    <div class="no-storage-info">
+    <div id="storage-info" class="no-storage-info" style="display: block;">
         <p><strong>Note:</strong> Nothing is saved on this website. Please export your data before leaving to use it later.</p>
+        <button class="close-info-btn" onclick="closeStorageInfo()">&times;</button>
     </div>
 
     <main>
@@ -113,6 +114,7 @@
         // Quiz State (Updated for Retries and Mastery Tracking)
         let quizQueue = []; // Holds items pending and needing retry
         let masteredTerms = new Set(); // Tracks unique terms answered correctly
+        let missedTerms = new Set(); // Tracks terms that were answered incorrectly
         let score = 0; // Current correct streak
         let questionsAttempted = 0; // Total attempts made in this session
         let questionsCorrectOverall = 0; // Total correct attempts
@@ -205,6 +207,14 @@
             document.querySelectorAll('.view-section').forEach(section => section.classList.remove('active'));
             document.getElementById(`view-${viewName}`).classList.add('active');
 
+            // Show/hide storage info only on editor page
+            const storageInfo = document.getElementById('storage-info');
+            if (viewName === 'input') {
+                storageInfo.style.display = 'block';
+            } else {
+                storageInfo.style.display = 'none';
+            }
+
             if(viewName === 'quiz') {
                 resetQuizState();
                 loadNextQuestion();
@@ -292,6 +302,7 @@
             // Shuffle a copy of vocabList for the initial quiz queue
             quizQueue = [...vocabList].sort(() => Math.random() - 0.5);
             masteredTerms = new Set();
+            missedTerms = new Set(); // Reset missed terms as well
             score = 0;
             questionsAttempted = 0;
             questionsCorrectOverall = 0;
@@ -347,11 +358,46 @@
             }
 
             // Get the next question from the front of the queue
-            const current = quizQueue.shift(); 
+            const current = quizQueue.shift();
             currentQuestion = current; // {term, def}
+
+            // Check if this question was previously missed
+            const wasMissed = missedTerms.has(current.term);
 
             // UI Text
             document.getElementById('quiz-question').textContent = current.def;
+
+            // Add indicator if this was a previously missed question
+            const quizQuestionElement = document.getElementById('quiz-question');
+            const quizCardElement = document.querySelector('.quiz-card');
+
+            // Clear any previous indicator
+            const existingIndicator = document.querySelector('.missed-question-indicator');
+            if (existingIndicator) {
+                existingIndicator.remove();
+            }
+
+            if (wasMissed) {
+                // Create indicator element
+                const indicator = document.createElement('div');
+                indicator.className = 'missed-question-indicator';
+                indicator.textContent = '⚠️ You previously missed this question';
+                indicator.style.cssText = `
+                    background-color: #ffecb3;
+                    color: #746a00;
+                    padding: 0.5rem;
+                    border-radius: 8px;
+                    margin-bottom: 1rem;
+                    text-align: center;
+                    font-weight: 600;
+                    font-size: 0.9rem;
+                    border: 2px solid #ffd43b;
+                    animation: fadeIn 0.3s ease;
+                `;
+
+                // Insert the indicator before the quiz question
+                quizCardElement.insertBefore(indicator, quizQuestionElement);
+            }
 
             // Generate Options: Correct answer + 3 distractors
             let options = [current];
@@ -397,6 +443,11 @@
                 // Add to mastered set (this item is complete for this study session)
                 masteredTerms.add(term);
 
+                // If this term was previously missed, remove it from missed set
+                if (missedTerms.has(term)) {
+                    missedTerms.delete(term);
+                }
+
                 // Play correct sound effect
                 playCorrectSound();
             } else {
@@ -417,6 +468,9 @@
 
                 // If they fail, they lose mastery status (must re-master)
                 masteredTerms.delete(term);
+
+                // Track that this term was missed
+                missedTerms.add(term);
 
                 // Play incorrect sound effect
                 playIncorrectSound();
@@ -526,6 +580,14 @@
         // Initialize with user's full vocabulary list
         document.getElementById('data-input').value =
 ``;
+
+        // Show storage info on page load since we start on the input view
+        document.getElementById('storage-info').style.display = 'block';
+
+        // Function to close the storage info notification
+        function closeStorageInfo() {
+            document.getElementById('storage-info').style.display = 'none';
+        }
 
     </script>
 </body>
