@@ -39,6 +39,7 @@
                     Stingy,not generous (especially with money);
                 </div>
                 <textarea id="data-input" placeholder="Paste your vocabulary list here..."></textarea>
+                </div>
                 <button class="btn-primary" onclick="processInput()">Generate Study Set</button>
                 <p id="error-msg" style="color: var(--error); margin-top: 10px; display: none; background: #fff5f5; padding: 10px; border-radius: 5px; border: 1px solid var(--error);"></p>
             </div>
@@ -49,10 +50,21 @@
             <div class="flashcard-container">
                 <div class="flashcard" onclick="flipCard()">
                     <div class="card-face front" id="card-front">
-                        <!-- Term goes here -->
+                        <div class="bookmark-overlay">
+                            <button class="control-btn" id="bookmark-btn" title="Bookmark this card" onclick="event.stopPropagation(); bookmarkCurrentCard();">
+                                <svg id="bookmark-icon" style="transition: all 0.2s ease;" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M17 3H7C5.89543 3 5 3.89543 5 5V21L12 16L19 21V5C19 3.89543 18.1046 3 17 3Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
+                            </button>
+                        </div>
+                        <div id="card-front-content">
+                            <!-- Term goes here -->
+                        </div>
                     </div>
                     <div class="card-face back" id="card-back">
-                        <!-- Definition goes here -->
+                        <div id="card-back-content">
+                            <!-- Definition goes here -->
+                        </div>
                     </div>
                 </div>
 
@@ -63,8 +75,17 @@
                     </div>
                     <button class="control-btn" onclick="nextCard()">&#8594;</button>
                 </div>
-                
+
                 <p style="margin-top: 1rem; color: var(--text-secondary); font-size: 0.9rem;">Click card to flip</p>
+
+                <!-- Bookmarked Cards Panel -->
+                <div id="bookmarked-panel" style="margin-top: 2rem; width: 100%; max-width: 600px;">
+                    <h3 style="text-align: left; margin: 0 0 1rem 0; color: var(--text-main); font-size: 1.1rem;">Bookmarked Cards</h3>
+                    <div id="bookmarked-cards-container" style="max-height: 150px; overflow-y: auto; padding: 0.5rem; border: 1px solid #e0e0e0; border-radius: 8px; background: #f8f9fa;">
+                        <div id="bookmarked-cards-list" style="display: flex; flex-wrap: wrap; gap: 0.5rem;"></div>
+                        <p id="no-bookmarks-message-panel" style="color: var(--text-secondary); font-style: italic; text-align: center; margin: 1rem 0; display: none;">No bookmarks yet</p>
+                    </div>
+                </div>
             </div>
         </section>
 
@@ -159,10 +180,13 @@
     <script>
         // --- State Management ---
         let vocabList = []; // Array of {term, def}
-        
+
         // Flashcard State
         let currentCardIndex = 0;
         let isFlipped = false;
+
+        // Bookmark State
+        let bookmarkedCards = new Set(); // Tracks indices of bookmarked cards
 
         // Quiz State (Updated for Retries and Mastery Tracking)
         let quizQueue = []; // Holds items pending and needing retry
@@ -245,8 +269,9 @@
 
                 vocabList = parsedData;
                 errorMsg.style.display = 'none';
-                
+
                 // Reset States
+                bookmarkedCards = new Set(); // Reset bookmarks when new data is loaded
                 initFlashcards();
                 initQuiz();
                 initTypingQuiz();
@@ -299,12 +324,22 @@
                 resetTypingQuizState();
                 loadNextTypingQuestion();
             }
+
+            // When switching back to flashcards view, update bookmark button state and refresh bookmarked panel
+            if(viewName === 'flashcards') {
+                updateBookmarkButton();
+                if (typeof updateBookmarkedCardsPanel === 'function') {
+                    updateBookmarkedCardsPanel(); // Update the bookmarked cards panel
+                }
+            }
         }
 
         // --- Flashcard Logic ---
         function initFlashcards() {
             currentCardIndex = 0;
             updateCardDisplay();
+            updateBookmarkButton();
+            updateBookmarkedCardsPanel(); // Initialize the bookmarked cards panel
         }
 
         function updateCardDisplay() {
@@ -318,22 +353,25 @@
             isFlipped = false;
             cardElement.classList.remove('is-flipped');
 
-            // Content
+            // Content - now using content containers to preserve bookmark overlays
             if (vocabList.length > 0) {
                 // Short timeout to allow flip animation reset before changing text if navigating quickly
                 setTimeout(() => {
-                    frontEl.textContent = vocabList[currentCardIndex].term;
-                    backEl.textContent = vocabList[currentCardIndex].def;
+                    document.getElementById('card-front-content').textContent = vocabList[currentCardIndex].term;
+                    document.getElementById('card-back-content').textContent = vocabList[currentCardIndex].def;
                 }, 150);
-                
+
                 indexEl.textContent = currentCardIndex + 1;
                 totalEl.textContent = vocabList.length;
             } else {
-                frontEl.textContent = 'No Vocabulary Loaded';
-                backEl.textContent = 'Please check the Editor tab.';
+                document.getElementById('card-front-content').textContent = 'No Vocabulary Loaded';
+                document.getElementById('card-back-content').textContent = 'Please check the Editor tab.';
                 indexEl.textContent = 0;
                 totalEl.textContent = 0;
             }
+
+            // Update bookmark button state
+            updateBookmarkButton();
         }
 
         function flipCard() {
@@ -370,8 +408,96 @@
             }
         }
 
+        function bookmarkCurrentCard() {
+            if (vocabList.length === 0) return;
+
+            // Get the current card index
+            const currentIndex = currentCardIndex;
+
+            // Toggle bookmark status
+            if (bookmarkedCards.has(currentIndex)) {
+                bookmarkedCards.delete(currentIndex); // Remove bookmark
+            } else {
+                bookmarkedCards.add(currentIndex); // Add bookmark
+            }
+
+            // Update UI to reflect bookmark state
+            updateBookmarkButton();
+            updateBookmarkedCardsPanel();
+        }
+
+        // Helper function to update the bookmark button UI
+        function updateBookmarkButton() {
+            const bookmarkBtn = document.getElementById('bookmark-btn');
+            const bookmarkIcon = document.getElementById('bookmark-icon');
+
+            if (bookmarkedCards.has(currentCardIndex)) {
+                // Bookmarked - use primary color to match app style
+                bookmarkBtn.style.color = 'var(--primary)'; // Primary blue color from app
+                bookmarkBtn.style.backgroundColor = 'rgba(66, 85, 255, 0.1)'; // Light blue background
+                bookmarkBtn.title = 'Unbookmark this card';
+            } else {
+                // Not bookmarked - use default color
+                bookmarkBtn.style.color = 'var(--text-secondary)';
+                bookmarkBtn.style.backgroundColor = 'transparent'; // Default background
+                bookmarkBtn.title = 'Bookmark this card';
+            }
+        }
+
+        // Function to update the bookmarked cards panel
+        function updateBookmarkedCardsPanel() {
+            const container = document.getElementById('bookmarked-cards-list');
+            const message = document.getElementById('no-bookmarks-message-panel');
+
+            // Get the array of bookmarked indices
+            const bookmarkedIndices = Array.from(bookmarkedCards).sort((a, b) => a - b);
+
+            if (bookmarkedIndices.length === 0) {
+                // No bookmarked cards - hide the cards container and show the message
+                container.innerHTML = ''; // Clear any previous buttons
+                container.style.display = 'none';
+                message.style.display = 'block';
+                return;
+            }
+
+            // Hide the message and show the cards container
+            message.style.display = 'none';
+            container.style.display = 'flex'; // Make sure the container is visible
+
+            // Clear the container and add bookmarked card buttons
+            container.innerHTML = ''; // Clear any previous content
+
+            // Add bookmarked card buttons
+            bookmarkedIndices.forEach(index => {
+                const bookmarkBtn = document.createElement('button');
+                bookmarkBtn.className = 'option-btn';
+                bookmarkBtn.style.flex = '1 1 auto';
+                bookmarkBtn.style.maxWidth = '120px';
+                bookmarkBtn.style.minWidth = '80px';
+                bookmarkBtn.style.fontSize = '0.8rem';
+                bookmarkBtn.style.padding = '0.5rem';
+                bookmarkBtn.style.textAlign = 'center';
+                bookmarkBtn.style.overflow = 'hidden';
+                bookmarkBtn.style.textOverflow = 'ellipsis';
+                bookmarkBtn.style.whiteSpace = 'nowrap';
+
+                // Truncate the term if it's too long
+                const term = vocabList[index].term;
+                const displayText = term.length > 20 ? term.substring(0, 17) + '...' : term;
+
+                bookmarkBtn.textContent = displayText;
+                bookmarkBtn.onclick = function() {
+                    // Navigate to the bookmarked card
+                    currentCardIndex = index;
+                    updateCardDisplay();
+                };
+
+                container.appendChild(bookmarkBtn);
+            });
+        }
+
         // --- Quiz Logic ---
-        
+
         function resetQuizState() {
             if (vocabList.length < 4) {
                  document.getElementById('quiz-question').textContent = "Need at least 4 terms to generate a multiple-choice quiz.";
@@ -685,7 +811,7 @@
 
             totalTypingQuestionsAttempted++; // Always increment total attempts
 
-            const isCorrect = userAnswer.toLowerCase() === currentTypingQuestion.term.toLowerCase();
+            const isCorrect = normalizeText(userAnswer) === normalizeText(currentTypingQuestion.term);
             const term = currentTypingQuestion.term;
             const correctTerm = currentTypingQuestion.term;
 
@@ -1032,10 +1158,10 @@
             let correctAnswer = '';
 
             if (quizMode) { // Definition -> Term: user should type the term
-                isCorrect = userAnswer.toLowerCase() === currentTypingQuestion.term.toLowerCase();
+                isCorrect = normalizeText(userAnswer) === normalizeText(currentTypingQuestion.term);
                 correctAnswer = currentTypingQuestion.term;
             } else { // Term -> Definition: user should type the definition
-                isCorrect = userAnswer.toLowerCase() === currentTypingQuestion.def.toLowerCase();
+                isCorrect = normalizeText(userAnswer) === normalizeText(currentTypingQuestion.def);
                 correctAnswer = currentTypingQuestion.def;
             }
 
@@ -1097,6 +1223,17 @@
             setTimeout(() => {
                 loadNextTypingQuestion();
             }, 2000);
+        }
+
+        // Function to normalize text for comparison (remove extra spaces, case-insensitive, etc.)
+        function normalizeText(text) {
+            return text
+                .toLowerCase()
+                .trim()
+                .replace(/\s+/g, ' ')  // Replace multiple spaces with single space
+                .replace(/[.,!?;:]+$/g, '')  // Remove punctuation at the end
+                .replace(/^(the|a|an)\s+/i, '')  // Remove common articles at the beginning
+                .replace(/[\'\u2018\u2019\u201A\u201B\u2032\u0060\u00B4]/g, "'"); // Normalize different types of apostrophes to standard apostrophe
         }
 
         // Function to display first-time misses in the results overlay
@@ -1214,10 +1351,6 @@
             incorrectSound.currentTime = 0;
             incorrectSound.play().catch(e => console.log('Audio play error:', e));
         }
-
-        // Initialize with user's full vocabulary list
-        document.getElementById('data-input').value =
-``;
 
         // Show storage info on page load since we start on the input view
         document.getElementById('storage-info').style.display = 'block';
