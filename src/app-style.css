@@ -343,6 +343,38 @@ textarea:focus {
     margin-bottom: 1rem;
 }
 
+/* Import/Export Buttons */
+.import-export-buttons {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.import-btn, .export-btn {
+    background-color: var(--primary);
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.import-btn:hover, .export-btn:hover {
+    background-color: var(--primary-hover);
+    transform: translateY(-2px);
+}
+
+.no-storage-info {
+    background-color: #fff5f5;
+    color: var(--error);
+    padding: 0.5rem 1rem;
+    text-align: center;
+    font-size: 0.8rem;
+    border-bottom: 1px solid var(--error);
+}
+
 /* Mobile Responsive */
 @media (max-width: 600px) {
     .options-grid {
@@ -353,6 +385,13 @@ textarea:focus {
     }
     header {
         padding: 1rem;
+        flex-direction: column;
+        gap: 0.5rem;
+        align-items: flex-start;
+    }
+    .import-export-buttons {
+        width: 100%;
+        justify-content: center;
     }
     main {
         padding: 1rem;

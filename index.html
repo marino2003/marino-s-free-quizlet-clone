@@ -9,13 +9,20 @@
 <body>
 
     <header>
-        <div class="logo">VocabMaster</div>
+        <div class="logo">Marino's Free Quizlet Clone</div>
         <nav>
             <button onclick="switchView('input')" id="nav-input" class="active">Editor</button>
             <button onclick="switchView('flashcards')" id="nav-flashcards">Flashcards</button>
             <button onclick="switchView('quiz')" id="nav-quiz">Quiz</button>
         </nav>
+        <div class="import-export-buttons">
+            <button onclick="importFile()" class="import-btn">Import</button>
+            <button onclick="exportFile()" class="export-btn">Export</button>
+        </div>
     </header>
+    <div class="no-storage-info">
+        <p><strong>Note:</strong> Nothing is saved on this website. Please export your data before leaving to use it later.</p>
+    </div>
 
     <main>
         <!-- INPUT VIEW -->
@@ -23,10 +30,11 @@
             <div class="input-container">
                 <h2>Create new Study Set</h2>
                 <div class="instructions">
-                    <strong>Format:</strong> word, definition; word, definition;
+                    <strong>Format:</strong> <br> word, definition; <br> word, definition;
                     <br><br>
                     <em>Example:</em><br>
-                    Abhor, to strongly hate or loathe something;
+                    Abhor, to strongly hate or loathe something; <br>
+                    Stingy,not generous (especially with money);
                 </div>
                 <textarea id="data-input" placeholder="Paste your vocabulary list here..."></textarea>
                 <button class="btn-primary" onclick="processInput()">Generate Study Set</button>
@@ -378,16 +386,19 @@
 
             const isCorrect = selectedTerm === currentQuestion.term;
             const term = currentQuestion.term;
-            
+
             questionsAttempted++;
 
             if (isCorrect) {
                 btnElement.classList.add('correct');
                 score++;
                 questionsCorrectOverall++;
-                
+
                 // Add to mastered set (this item is complete for this study session)
-                masteredTerms.add(term); 
+                masteredTerms.add(term);
+
+                // Play correct sound effect
+                playCorrectSound();
             } else {
                 btnElement.classList.add('wrong');
                 score = 0; // Reset streak on failure
@@ -398,7 +409,7 @@
                         b.classList.add('correct');
                     }
                 });
-                
+
                 // REINFORCEMENT LEARNING: Re-queue the question
                 // Insert it randomly between position 1 and 3 (or at the end if the queue is short)
                 const insertionIndex = Math.min(quizQueue.length, Math.floor(Math.random() * 3) + 1);
@@ -406,6 +417,9 @@
 
                 // If they fail, they lose mastery status (must re-master)
                 masteredTerms.delete(term);
+
+                // Play incorrect sound effect
+                playIncorrectSound();
             }
 
             updateScoreDisplay(); // Updates streak, attempts, and progress bar
@@ -440,8 +454,77 @@
             document.getElementById('results-overlay').style.display = 'none';
         }
 
+        // Import file functionality
+        function importFile() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.txt';
+            input.onchange = event => {
+                const file = event.target.files[0];
+                const reader = new FileReader();
+
+                reader.onload = e => {
+                    document.getElementById('data-input').value = e.target.result;
+                    // Automatically process the imported content
+                    processInput();
+                };
+
+                reader.readAsText(file);
+            };
+
+            input.click();
+        }
+
+        // Export file functionality
+        function exportFile() {
+            if (vocabList.length === 0) {
+                alert('No vocabulary data to export. Please create a study set first.');
+                return;
+            }
+
+            let content = '';
+            vocabList.forEach(item => {
+                content += `${item.term}, ${item.def};\n`;
+            });
+
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'vocab_list.txt';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        // Audio elements for sound effects - try both public and relative paths
+        let correctSound = new Audio('/soundeffects/correct.mp3');
+        let incorrectSound = new Audio('/soundeffects/incorrect.mp3');
+
+        // Set up error handling to try alternative paths if needed
+        correctSound.onerror = () => {
+            correctSound = new Audio('./public/soundeffects/correct.mp3');
+        };
+
+        incorrectSound.onerror = () => {
+            incorrectSound = new Audio('./public/soundeffects/incorrect.mp3');
+        };
+
+        // Function to play correct sound
+        function playCorrectSound() {
+            correctSound.currentTime = 0;
+            correctSound.play().catch(e => console.log('Audio play error:', e));
+        }
+
+        // Function to play incorrect sound
+        function playIncorrectSound() {
+            incorrectSound.currentTime = 0;
+            incorrectSound.play().catch(e => console.log('Audio play error:', e));
+        }
+
         // Initialize with user's full vocabulary list
-        document.getElementById('data-input').value = 
+        document.getElementById('data-input').value =
 ``;
 
     </script>
